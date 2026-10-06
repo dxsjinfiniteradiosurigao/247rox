@@ -17,40 +17,62 @@ body{display:flex;flex-direction:column;align-items:center;justify-content:cente
 .frame{width:min(100%,1100px);aspect-ratio:16/9;background:#000;border-radius:10px;overflow:hidden}
 iframe{width:100%;height:100%;border:0}
 #note{margin:0;opacity:.75;font-size:.9rem}
-body.obs{padding:0;gap:0}
-.obs .bar,.obs #note{display:none}
-.obs .frame{width:100vw;height:100vh;aspect-ratio:auto;border-radius:0}
+body{padding:0;gap:0;overflow:hidden}
+.frame{position:fixed;inset:0;width:100vw;height:100vh;aspect-ratio:auto;border-radius:0}
+.bar{position:fixed;z-index:2;top:max(16px,env(safe-area-inset-top));left:16px;width:auto;pointer-events:none}
+.bar h1,#note{display:none}
+#badge{font-size:1.1rem;box-shadow:0 2px 10px rgba(0,0,0,.5)}
+#standby{position:fixed;inset:0;z-index:1;display:flex;align-items:center;justify-content:center;text-align:center;background:radial-gradient(circle at 50% 40%,#1b2a5c,#0b1020 70%);opacity:0;visibility:hidden;transition:opacity .4s,visibility .4s}
+#standby.on{opacity:1;visibility:visible}
+#standby h2{margin:18px 0 6px;font-size:clamp(1.6rem,5vw,3.4rem);letter-spacing:.18em;animation:glow 2.4s ease-in-out infinite}
+#standby p{margin:0;opacity:.7;letter-spacing:.12em}
+.eq{display:flex;gap:8px;height:70px;align-items:flex-end;justify-content:center}
+.eq i{width:12px;height:100%;background:var(--replay);border-radius:3px;transform-origin:bottom;animation:eq 1s ease-in-out infinite}
+.eq i:nth-child(2){animation-delay:-.8s}.eq i:nth-child(3){animation-delay:-.5s}.eq i:nth-child(4){animation-delay:-.3s}.eq i:nth-child(5){animation-delay:-.65s}
+@keyframes eq{0%,100%{transform:scaleY(.2)}50%{transform:scaleY(1)}}
+@keyframes glow{50%{opacity:.55}}
+@media (prefers-reduced-motion:reduce){.eq i,#standby h2{animation:none}}
+#snd{position:fixed;z-index:3;top:max(16px,env(safe-area-inset-top));right:16px;display:none;padding:8px 14px;border:0;border-radius:99px;font:700 .9rem system-ui,sans-serif;background:#fff;color:#111;cursor:pointer}
 </style></head><body>
 <div class="bar"><h1>DXSJ 93.3 Infinite Radio Surigao</h1><span id="badge">OFFLINE</span></div>
 <div class="frame"><div id="yt"></div></div>
+<div id="standby" class="on"><div><div class="eq"><i></i><i></i><i></i><i></i><i></i></div><h2>PLEASE STAND BY</h2><p>DXSJ 93.3 INFINITE RADIO SURIGAO</p></div></div>
+<button id="snd" onclick="sound()">🔊 Tap to unmute</button>
 <p id="note">Loading…</p>
 <script src="https://www.youtube.com/iframe_api"></script>
 <script>
 const STATUS_URL = "status.json", REPLAYS_URL = "replays.json";
 const OBS = new URLSearchParams(location.search).has("obs"); // OBS mode: unmuted, no UI
 if(OBS) document.body.classList.add("obs");
-let player, ready=false, mode=null, liveId=null, last=null, status=null, replays=[];
+let wantSound=false, queue=[], known=new Set(), endedLive=null, player, ready=false, mode=null, liveId=null, last=null, status=null, replays=[];
 function onYouTubeIframeAPIReady(){
   player = new YT.Player("yt",{width:"100%",height:"100%",
     playerVars:{autoplay:1,mute:OBS?0:1,controls:OBS?0:1,playsinline:1},
-    events:{onReady:()=>{ready=true;apply();},
-      onStateChange:e=>{ if(e.data===0 && mode==="replay") nextReplay(); },
-      onError:()=>{ if(mode==="replay") setTimeout(nextReplay,1500); }}});
+    events:{onReady:()=>{ready=true; if(OBS) sound(); apply();},
+      onStateChange:e=>{ const st=e.data; clearTimeout(sbTimer); if(st===1){ standby(false); if(wantSound){ player.unMute(); player.setVolume(100); } updSnd(); } else if(st===0||st===-1) standby(true); else if(st===3) sbTimer=setTimeout(()=>standby(true),2500); if(st!==0) return; if(mode==="replay") nextReplay(); else if(mode==="live"){ endedLive=liveId; apply(); } },
+      onError:()=>{ standby(true); if(mode==="replay") setTimeout(nextReplay,1500); else if(mode==="live") setTimeout(()=>player.loadVideoById(liveId),5000); }}});
 }
+let sbTimer;
+function standby(on){ document.getElementById("standby").classList.toggle("on",on); }
+function sound(){ wantSound=true; player.unMute(); player.setVolume(100); updSnd(); }
+function updSnd(){ document.getElementById("snd").style.display = (!OBS && !wantSound && player.isMuted && player.isMuted()) ? "block" : "none"; }
+function shuffle(a){ for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; }
 function nextReplay(){
-  const pool = replays.filter(i=>i!==last), list = pool.length ? pool : replays;
-  if(!list.length) return;
-  last = list[Math.floor(Math.random()*list.length)];
-  player.loadVideoById(last);
+  if(!queue.length) queue = shuffle(replays.slice());
+  if(queue.length>1 && queue[queue.length-1]===last) queue.unshift(queue.pop());
+  if(!queue.length) return;
+  last = queue.pop(); standby(true); player.loadVideoById(last);
 }
 function apply(){
   if(!ready || !status) return;
-  if(status.live){
-    if(mode!=="live" || liveId!==status.videoId){ mode="live"; liveId=status.videoId; player.loadVideoById(liveId); }
+  if(wantSound && player.isMuted && player.isMuted()) player.unMute();
+  const isLive = status.live && status.videoId!==endedLive;
+  if(isLive){
+    if(mode!=="live" || liveId!==status.videoId){ mode="live"; liveId=status.videoId; standby(true); player.loadVideoById(liveId); }
   } else if(mode!=="replay" || !last){ mode="replay"; nextReplay(); }
   const b=document.getElementById("badge");
-  b.textContent = status.live ? "LIVE" : "OFFLINE · REPLAY";
-  b.className = status.live ? "live" : "";
+  b.textContent = isLive ? "LIVE" : "OFFLINE (REPLAY)";
+  b.className = isLive ? "live" : "";
   document.getElementById("note").textContent = status.live ? "We're on air. Tap the speaker to unmute." : "We're off air right now. Replaying past broadcasts.";
 }
 async function tick(){
@@ -59,8 +81,9 @@ async function tick(){
     status = await (await fetch(STATUS_URL+t,{cache:"no-store"})).json();
     try{ replays = (await (await fetch(REPLAYS_URL+t,{cache:"no-store"})).json()).ids || []; }catch(e){}
     if(!replays.length && status.replay) replays = [status.replay];
+    replays.filter(i=>!known.has(i)).forEach(i=>{ known.add(i); queue.splice(Math.floor(Math.random()*(queue.length+1)),0,i); });
     apply();
   }catch(e){ document.getElementById("note").textContent = "Can't check live status. Retrying…"; }
 }
-tick(); setInterval(tick, 60000);
+tick(); setInterval(tick, 15000);
 </script></body></html>
