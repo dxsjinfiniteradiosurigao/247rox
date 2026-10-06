@@ -42,7 +42,7 @@ body{padding:0;gap:0;overflow:hidden}
 <script src="https://www.youtube.com/iframe_api"></script>
 <script>
 const STATUS_URL = "status.json", REPLAYS_URL = "replays.json";
-const OBS = new URLSearchParams(location.search).has("obs"); // OBS mode: unmuted, no UI
+const OBS = new URLSearchParams(location.search).has("obs") || !!window.obsstudio; // OBS mode: unmuted, no UI
 if(OBS) document.body.classList.add("obs");
 let wantSound=false, queue=[], known=new Set(), endedLive=null, player, ready=false, mode=null, liveId=null, last=null, status=null, replays=[];
 function onYouTubeIframeAPIReady(){
@@ -85,5 +85,6 @@ async function tick(){
     apply();
   }catch(e){ document.getElementById("note").textContent = "Can't check live status. Retrying…"; }
 }
+["pointerdown","keydown"].forEach(ev=>addEventListener(ev,()=>{ if(ready && !wantSound) sound(); }));
 tick(); setInterval(tick, 15000);
 </script></body></html>
