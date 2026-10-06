@@ -22,27 +22,44 @@ body.obs{padding:0;gap:0}
 .obs .frame{width:100vw;height:100vh;aspect-ratio:auto;border-radius:0}
 </style></head><body>
 <div class="bar"><h1>DXSJ 93.3 Infinite Radio Surigao</h1><span id="badge">OFFLINE</span></div>
-<div class="frame"><iframe id="yt" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen title="Livestream"></iframe></div>
+<div class="frame"><div id="yt"></div></div>
 <p id="note">Loading…</p>
+<script src="https://www.youtube.com/iframe_api"></script>
 <script>
-const STATUS_URL = "status.json"; // if Pages doesn't redeploy on bot commits, use the raw.githubusercontent.com URL of status.json
-let current = null;
+const STATUS_URL = "status.json", REPLAYS_URL = "replays.json";
 const OBS = new URLSearchParams(location.search).has("obs"); // OBS mode: unmuted, no UI
 if(OBS) document.body.classList.add("obs");
+let player, ready=false, mode=null, liveId=null, last=null, status=null, replays=[];
+function onYouTubeIframeAPIReady(){
+  player = new YT.Player("yt",{width:"100%",height:"100%",
+    playerVars:{autoplay:1,mute:OBS?0:1,controls:OBS?0:1,playsinline:1},
+    events:{onReady:()=>{ready=true;apply();},
+      onStateChange:e=>{ if(e.data===0 && mode==="replay") nextReplay(); },
+      onError:()=>{ if(mode==="replay") setTimeout(nextReplay,1500); }}});
+}
+function nextReplay(){
+  const pool = replays.filter(i=>i!==last), list = pool.length ? pool : replays;
+  if(!list.length) return;
+  last = list[Math.floor(Math.random()*list.length)];
+  player.loadVideoById(last);
+}
+function apply(){
+  if(!ready || !status) return;
+  if(status.live){
+    if(mode!=="live" || liveId!==status.videoId){ mode="live"; liveId=status.videoId; player.loadVideoById(liveId); }
+  } else if(mode!=="replay" || !last){ mode="replay"; nextReplay(); }
+  const b=document.getElementById("badge");
+  b.textContent = status.live ? "LIVE" : "OFFLINE · REPLAY";
+  b.className = status.live ? "live" : "";
+  document.getElementById("note").textContent = status.live ? "We're on air. Tap the speaker to unmute." : "We're off air right now. Replaying past broadcasts.";
+}
 async function tick(){
   try{
-    const s = await (await fetch(STATUS_URL + "?t=" + Date.now(), {cache:"no-store"})).json();
-    const key = s.videoId + (s.live ? ":live" : ":replay");
-    if(s.videoId && key !== current){
-      current = key;
-      const base = `autoplay=1&mute=${OBS?0:1}&controls=${OBS?0:1}`;
-      const q = s.live ? base : `${base}&loop=1&playlist=${s.videoId}`;
-      document.getElementById("yt").src = `https://www.youtube.com/embed/${s.videoId}?${q}`;
-    }
-    const b = document.getElementById("badge");
-    b.textContent = s.live ? "LIVE" : "OFFLINE · REPLAY";
-    b.className = s.live ? "live" : "";
-    document.getElementById("note").textContent = s.live ? "We're on air. Tap the speaker to unmute." : "We're off air right now. Replaying our previous broadcast.";
+    const t = "?t=" + Date.now();
+    status = await (await fetch(STATUS_URL+t,{cache:"no-store"})).json();
+    try{ replays = (await (await fetch(REPLAYS_URL+t,{cache:"no-store"})).json()).ids || []; }catch(e){}
+    if(!replays.length && status.replay) replays = [status.replay];
+    apply();
   }catch(e){ document.getElementById("note").textContent = "Can't check live status. Retrying…"; }
 }
 tick(); setInterval(tick, 60000);
